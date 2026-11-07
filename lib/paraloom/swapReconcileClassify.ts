@@ -17,9 +17,12 @@ export const RESUME_MIN_LAMPORTS = 6_000_000n
 export const WSOL_MINT = "So11111111111111111111111111111111111111112"
 
 /** True when `outputMint` denotes native SOL (the literal "SOL" or the wrapped
- *  mint). Kept here (no heavy imports) so it is unit-testable. */
+ *  mint). Kept here (no heavy imports) so it is unit-testable. Trims
+ *  surrounding whitespace: a padded mint from a dApp or a stored row must not
+ *  be mis-handled as an SPL. */
 export function isNativeSolOutput(mint: string): boolean {
-  return mint === "SOL" || mint === WSOL_MINT
+  const m = mint.trim()
+  return m === "SOL" || m === WSOL_MINT
 }
 
 export type StrandAction = "skip" | "resume" | "landed" | "unresolved"
@@ -36,7 +39,11 @@ export function classifyStrand(args: {
   tokenAmount: bigint
 }): StrandAction {
   if (args.hasSignature) return "skip"
-  if (args.ageMs < RESUME_GRACE_MS) return "skip"
+  // A non-finite age (NaN from a corrupted createdAt) must NOT bypass the
+  // grace window: `NaN < RESUME_GRACE_MS` is false, which used to classify an
+  // in-flight swap as "resume"/"landed" immediately. Treat unknown age as
+  // still in flight.
+  if (!Number.isFinite(args.ageMs) || args.ageMs < RESUME_GRACE_MS) return "skip"
   if (args.solLamports > RESUME_MIN_LAMPORTS) return "resume"
   if (args.tokenAmount > 0n) return "landed"
   return "unresolved"

@@ -22,6 +22,28 @@ describe("classifyStrand", () => {
     ).toBe("skip")
   })
 
+  it("skips a row whose age is NaN (corrupted createdAt) instead of bypassing the grace window", () => {
+    expect(
+      classifyStrand({
+        hasSignature: false,
+        ageMs: NaN,
+        solLamports: 10_000_000n,
+        tokenAmount: 5_000_000n
+      })
+    ).toBe("skip")
+  })
+
+  it("skips a row whose age is infinite (corrupted createdAt)", () => {
+    expect(
+      classifyStrand({
+        hasSignature: false,
+        ageMs: Infinity,
+        solLamports: 10_000_000n,
+        tokenAmount: 5_000_000n
+      })
+    ).toBe("skip")
+  })
+
   it("skips a row still inside the in-flight grace window", () => {
     expect(
       classifyStrand({
@@ -102,5 +124,17 @@ describe("isNativeSolOutput", () => {
 
   it("treats USDC (any SPL mint) as NOT native SOL", () => {
     expect(isNativeSolOutput("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")).toBe(false)
+  })
+
+  it("treats a whitespace-padded 'SOL' as native SOL", () => {
+    expect(isNativeSolOutput("  SOL  ")).toBe(true)
+  })
+
+  it("treats a whitespace-padded wrapped-SOL mint as native SOL", () => {
+    expect(isNativeSolOutput(`  ${WSOL_MINT}\n`)).toBe(true)
+  })
+
+  it("treats a whitespace-only string as NOT native SOL", () => {
+    expect(isNativeSolOutput("   ")).toBe(false)
   })
 })

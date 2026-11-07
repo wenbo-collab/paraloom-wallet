@@ -159,6 +159,14 @@ function isFromPopup(sender: chrome.runtime.MessageSender): boolean {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Malformed messages (null / undefined / primitives) carry no `type` to
+  // dispatch on; answer them instead of throwing on `message.type` and
+  // taking the worker down with the handler.
+  if (!message || typeof message !== "object") {
+    sendResponse({ success: false, error: "invalid message" })
+    return false
+  }
+
   // Popup-only messages are refused outright when they arrive from a page.
   // Without this the approval screen is decorative: a script on any injected
   // origin approves its own connection and reads the visitor's shielded
@@ -436,8 +444,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function handleConnect(sender: chrome.runtime.MessageSender) {
   // sender.origin is the origin of the page that called window.paraloom.connect
   // (set for content-script senders without needing the "tabs" permission).
-  const origin =
-    sender.origin ?? (sender.tab?.url ? new URL(sender.tab.url).origin : null)
+  // senderOrigin rejects opaque / non-HTTP(S) origins, so a sandboxed iframe
+  // can never connect as "null" and a malformed tab URL cannot throw here.
+  const origin = senderOrigin(sender)
   if (!origin) {
     throw new Error("Unable to determine the requesting site's origin")
   }
@@ -496,6 +505,14 @@ async function handleConnect(sender: chrome.runtime.MessageSender) {
 function requestApproval(origin: string, timeoutMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     const id = ++connectionIdCounter
+    // Supersede any outstanding request: resolve it as rejected so its waiter
+    // is released instead of hanging until its own timeout while the popup
+    // already shows the new request. Must run before the new entry is
+    // registered — the old resolve clears `pendingConnection`, which the new
+    // entry then reclaims.
+    if (pendingConnection) {
+      pendingConnection.resolve(false)
+    }
     const clearPersisted = () =>
       void chrome.storage.session.remove("pendingConn").catch(() => {})
     const timer = setTimeout(() => {
@@ -609,8 +626,20 @@ async function handleGetAddress(sender: chrome.runtime.MessageSender) {
 // in-memory connectedOrigin.
 // The requesting page's origin, resolved without the "tabs" permission. A popup
 // (extension context) has no tab; a content-script relay always does.
+// Rejects opaque ("null") origins — approving one would authorize every
+// sandboxed iframe on every site — and non-HTTP(S) origins, and never throws
+// on a malformed tab URL.
 function senderOrigin(sender: chrome.runtime.MessageSender): string | null {
-  return sender.origin ?? (sender.tab?.url ? new URL(sender.tab.url).origin : null)
+  const raw = sender.origin ?? sender.tab?.url ?? null
+  if (!raw || raw === "null") return null
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return null
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null
+  return url.origin
 }
 
 async function isAuthorizedSender(
@@ -712,6 +741,14 @@ function requestSwapApproval(
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const id = ++swapIdCounter
+    // Supersede any outstanding swap approval: resolve it as rejected so the
+    // prior runSwapJob coroutine is released instead of hanging on a promise
+    // that never settles (its timeout only fires for the current id). Must run
+    // before the new entry is registered — the old resolve clears
+    // `pendingSwap`, which the new entry then reclaims.
+    if (pendingSwap) {
+      pendingSwap.resolve(false)
+    }
     const timer = setTimeout(() => {
       if (pendingSwap?.id === id) {
         pendingSwap = null
