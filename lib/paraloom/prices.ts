@@ -1,22 +1,41 @@
 // USD prices for the Home portfolio, from Jupiter's price API. Keyed by base58
-// mint so it scales to any future shielded SPL — pass the mints you hold and get
-// back { usdPrice, priceChange24h } per mint. Best-effort: a failed fetch just
-// yields no prices (the UI then shows amounts without a USD value).
+// mint. Best-effort: a failed fetch just yields no prices (the UI then shows
+// amounts without a USD value).
+//
+// Privacy: the request ALWAYS carries the same fixed universe of well-known
+// mints (PRICED_MINTS) and never the user's held set. The query string is
+// therefore identical for every user on every popup open, so it discloses
+// nothing about which shielded notes the user holds (fixes #1577). A held
+// mint outside the universe simply has no USD price shown; add mints to the
+// universe (after verifying Jupiter prices them) rather than querying held
+// mints.
 
 const JUP_PRICE_URL = "https://lite-api.jup.ag/price/v3"
 
 // Wrapped-SOL mint — the price id for native SOL.
 export const SOL_MINT = "So11111111111111111111111111111111111111112"
 
+// Fixed universe of well-known mints whose prices are fetched. This list is
+// the entire query, for every user, every time — do not merge held mints in.
+export const PRICED_MINTS: readonly string[] = [
+  SOL_MINT, // SOL
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+  "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", // JUP
+  "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", // WIF
+  "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE", // ORCA
+  "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr", // POPCAT
+  "MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5", // MEW
+  "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82" // BOME
+]
+
 export interface TokenPrice {
   usdPrice: number
   priceChange24h: number // percent, e.g. -0.19
 }
 
-export async function fetchPrices(
-  mints: string[]
-): Promise<Record<string, TokenPrice>> {
-  const ids = Array.from(new Set([SOL_MINT, ...mints])).filter(Boolean)
+export async function fetchPrices(): Promise<Record<string, TokenPrice>> {
+  const ids = [...PRICED_MINTS]
   if (ids.length === 0) return {}
   try {
     const ctrl = new AbortController()

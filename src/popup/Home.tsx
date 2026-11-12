@@ -356,13 +356,15 @@ export function Home({ onLock }: HomeProps) {
     setActivityDetail(null)
   }
 
-  // USD prices for the held assets (SOL is always priced). Refetch when the set
-  // of shielded tokens changes; a failed fetch just leaves amounts un-valued.
+  // USD prices for the held assets (SOL is always priced). The request
+  // carries a fixed universe of well-known mints, never the held set, so it
+  // is fetched once per wallet/network — not on every holdings change.
   useEffect(() => {
-    fetchPrices(Object.keys(shieldedTokens))
+    fetchPrices()
       .then(setPrices)
       .catch(() => {})
-  }, [shieldedTokens])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet, network])
 
   async function handleDeposit() {
     if (!wallet) return
